@@ -1,5 +1,6 @@
 package com.tomczyn.kfs.ui.greeting
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -12,15 +13,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,22 +38,6 @@ sealed interface BottomSheet : Serializable {
     data object Bar : BottomSheet
 }
 
-//val LocalBottomSheetInvoker =
-//    staticCompositionLocalOf<(BottomSheet) -> Unit> { error("No BottomSheetInvoker provided") }
-val LocalBottomSheet =
-    staticCompositionLocalOf<LocalBottomSheetScope> { error("No BottomSheet provided") }
-//val LocalBottomSheetDismiss =
-//    staticCompositionLocalOf<() -> Unit> { error("No onDismiss provided") }
-
-interface LocalBottomSheetScope {
-    val type: BottomSheet
-    fun show(bottomSheet: BottomSheet)
-
-    @Composable
-    fun register(type: BottomSheet, content: @Composable () -> Unit)
-    fun dismiss()
-}
-
 @Composable
 fun GreetingScreen() {
     BottomSheetLayout {
@@ -68,22 +50,21 @@ fun GreetingScreen() {
 }
 
 @Composable
-fun Greeting() {
-    val bottomSheet = LocalBottomSheet.current
+fun AppScope.Greeting() {
     Box {
         Column(modifier = Modifier.fillMaxSize()) {
             Button(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
-                onClick = { bottomSheet.show(Foo) },
+                onClick = { showBottomSheet(Foo) },
             ) {
                 Text(text = "Show bottom bar")
             }
         }
-        bottomSheet.register(Foo) {
+        registerBottomSheet(Foo) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Button(
                     modifier = Modifier.align(Alignment.CenterHorizontally),
-                    onClick = { bottomSheet.show(Bar) }) {
+                    onClick = { showBottomSheet(Bar) }) {
                     Text(
                         text = "Foo",
                         textAlign = TextAlign.Center
@@ -91,11 +72,11 @@ fun Greeting() {
                 }
             }
         }
-        bottomSheet.register(Bar) {
+        registerBottomSheet(Bar) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Button(
                     modifier = Modifier.align(Alignment.CenterHorizontally),
-                    onClick = { bottomSheet.dismiss() }) {
+                    onClick = { dismissBottomSheet() }) {
                     Text(
                         text = "Bar",
                         textAlign = TextAlign.Center
@@ -114,18 +95,18 @@ fun DefaultPreview() {
 
 @Composable
 fun CustomBottomSheet(
+    scope: AppScope,
     type: BottomSheet,
     content: @Composable (onDismiss: () -> Unit) -> Unit,
 ) {
-    val bottomSheet = LocalBottomSheet.current
     val colorScheme = MaterialTheme.colorScheme
-    if (bottomSheet.type == type) {
+    if (scope.bottomSheet == type) {
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.5f))
-                    .clickable { bottomSheet.dismiss() }
+                    .clickable { scope.dismissBottomSheet() }
             )
             Box(
                 modifier = Modifier
@@ -137,7 +118,7 @@ fun CustomBottomSheet(
                         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
                     )
             ) {
-                content { bottomSheet.dismiss() }
+                content { scope.dismissBottomSheet() }
             }
         }
     }
@@ -145,57 +126,52 @@ fun CustomBottomSheet(
 
 @Composable
 fun BottomSheetLayout(
-    content: @Composable BottomSheetLayoutContext.() -> Unit,
+    content: @Composable AppScope.() -> Unit,
 ) {
     var currentBottomSheet by rememberSaveable { mutableStateOf<BottomSheet>(BottomSheet.None) }
     val empty: @Composable () -> Unit = {}
     var sheets: Map<BottomSheet, @Composable () -> Unit> by remember {
         mutableStateOf(mapOf(BottomSheet.None to empty))
     }
-    val bottomSheetState = remember {
-        object : LocalBottomSheetScope {
-            override val type: BottomSheet
+    val appScope = remember {
+        object : AppScope {
+            override val bottomSheet: BottomSheet
                 get() = currentBottomSheet
 
-            override fun show(bottomSheet: BottomSheet) {
-                currentBottomSheet = bottomSheet
+            override fun showBottomSheet(sheet: BottomSheet) {
+                currentBottomSheet = sheet
             }
 
             @Composable
-            override fun register(type: BottomSheet, content: @Composable () -> Unit) {
+            override fun registerBottomSheet(sheet: BottomSheet, content: @Composable () -> Unit) {
                 LaunchedEffect(Unit) {
-                    sheets = sheets.toMutableMap().apply { put(type, content) }
+                    sheets = sheets.toMutableMap().apply { put(sheet, content) }
                 }
             }
 
-            override fun dismiss() {
+            override fun dismissBottomSheet() {
                 currentBottomSheet = BottomSheet.None
             }
         }
     }
-    val context by remember { derivedStateOf { BottomSheetLayoutContext(bottomSheetState.type) } }
-    BottomSheetProvider(bottomSheetState = bottomSheetState) {
-        Box {
-            context.content()
-            if (currentBottomSheet != BottomSheet.None) {
-                CustomBottomSheet(type = currentBottomSheet) {
-                    sheets[currentBottomSheet]?.invoke()
-                }
+    Box {
+        appScope.content()
+        if (currentBottomSheet != BottomSheet.None) {
+            CustomBottomSheet(appScope, currentBottomSheet) {
+                sheets[currentBottomSheet]?.invoke()
             }
         }
     }
 }
 
-@Composable
-fun BottomSheetProvider(
-    bottomSheetState: LocalBottomSheetScope,
-    content: @Composable () -> Unit
-) {
-    CompositionLocalProvider(LocalBottomSheet provides bottomSheetState) {
-        content()
-    }
-}
+interface AppScope {
+    val bottomSheet: BottomSheet
 
-data class BottomSheetLayoutContext(
-    val bottomSheet: BottomSheet,
-)
+    fun showBottomSheet(sheet: BottomSheet)
+
+    @SuppressLint("ComposableNaming")
+    @Composable
+    fun registerBottomSheet(sheet: BottomSheet, content: @Composable () -> Unit)
+
+    fun dismissBottomSheet()
+}
